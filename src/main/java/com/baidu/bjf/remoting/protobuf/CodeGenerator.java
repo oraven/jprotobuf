@@ -230,7 +230,9 @@ public class CodeGenerator {
         code.append("private ").append(descriptorClsName).append(" descriptor").append(JAVA_LINE_BREAK);
 
         code.append(getEncodeMethodCode());
+        code.append(getEncodeOverloadMethodCode());
         code.append(getDecodeMethodCode());
+        code.append(getDecodeOverloadMethodCode());
         code.append(getSizeMethodCode());
         code.append(getWriteToMethodCode());
         code.append(getReadFromMethodCode());
@@ -398,6 +400,170 @@ public class CodeGenerator {
                 // try to eagle load
                 relativeProxyClasses.add(cls);
                 
+                code.append("int length = input.readRawVarint32();\n");
+                code.append("final int oldLimit = input.pushLimit(length);\n");
+                listTypeCheck = true;
+                express = "(" + name + ") codec.readFrom(input)";
+            }
+
+            if (field.getFieldType() == FieldType.BYTES) {
+                express += ".toByteArray()";
+            }
+
+            code.append(getSetToField("ret", field.getField(), cls, express, isList));
+
+            code.append(";\n");
+
+            if (listTypeCheck) {
+                code.append("input.checkLastTagWas(0);\n");
+                code.append("input.popLimit(oldLimit);\n");
+            }
+
+            code.append("continue;\n");
+            code.append("}");
+
+        }
+
+        code.append("input.skipField(tag);\n");
+        code.append("}");
+        code.append("} catch (com.google.protobuf.InvalidProtocolBufferException e) {");
+        code.append("throw e;");
+        code.append("} catch (java.io.IOException e) {");
+        code.append("throw e;");
+        code.append("}");
+
+        for (FieldInfo field : fields) {
+            if (field.isRequired()) {
+                code.append(CodedConstant.getRetRequiredCheck(getAccessByField("ret", field.getField(), cls),
+                        field.getField()));
+            }
+
+        }
+
+        code.append("return ret;\n");
+
+        code.append("}\n");
+
+        return code.toString();
+    }
+
+    /**
+     *
+     * */
+    private String getDecodeOverloadMethodCode() {
+        StringBuilder code = new StringBuilder();
+
+        code.append("public ").append(cls.getName().replaceAll("\\$", "."));
+        code.append(" decode(final byte[] bb, int pos, int len) throws IOException {\n");
+        code.append(cls.getName().replaceAll("\\$", ".")).append(" ret = new ");
+        code.append(cls.getName().replaceAll("\\$", ".")).append("();");
+        code.append("CodedInputStream input = CodedInputStream.newInstance(bb, pos, len);\n");
+        code.append("try {\n");
+        code.append("boolean done = false;\n");
+        code.append("Codec codec = null;\n");
+        code.append("while (!done) {\n");
+        code.append("int tag = input.readTag();\n");
+        code.append("if (tag == 0) { break;}\n");
+
+        for (FieldInfo field : fields) {
+            boolean isList = isListType(field.getField());
+
+            if (field.getFieldType() != FieldType.DEFAULT) {
+                code.append("if (tag == ").append(
+                        CodedConstant.makeTag(field.getOrder(), field.getFieldType().getInternalFieldType()
+                                .getWireType()));
+                code.append(") {\n");
+            } else {
+                code.append("if (tag == CodedConstant.makeTag(").append(field.getOrder());
+                code.append(",WireFormat.").append(field.getFieldType().getWireFormat()).append(")) {\n");
+            }
+            String t = field.getFieldType().getType();
+            t = CodedConstant.capitalize(t);
+
+            boolean listTypeCheck = false;
+            String express;
+            if (field.getFieldType() == FieldType.ENUM) {
+                String clsName = field.getField().getType().getName().replaceAll("\\$", ".");
+                if (isList) {
+                    Type type = field.getField().getGenericType();
+                    if (type instanceof ParameterizedType) {
+                        ParameterizedType ptype = (ParameterizedType) type;
+
+                        Type[] actualTypeArguments = ptype.getActualTypeArguments();
+
+                        if (actualTypeArguments != null && actualTypeArguments.length > 0) {
+                            Type targetType = actualTypeArguments[0];
+                            if (targetType instanceof Class) {
+                                Class cls = (Class) targetType;
+                                clsName = cls.getName().replaceAll("\\$", ".");
+                            }
+                        }
+                    }
+                }
+                express =
+                        "Enum.valueOf(" + clsName + ".class, CodedConstant.getEnumName(" + clsName + ".values(),"
+                                + "input.read" + t + "()))";
+            } else {
+                express = "input.read" + t + "()";
+            }
+            if (isList && field.getFieldType() == FieldType.OBJECT) {
+                Type type = field.getField().getGenericType();
+                if (type instanceof ParameterizedType) {
+                    ParameterizedType ptype = (ParameterizedType) type;
+
+                    Type[] actualTypeArguments = ptype.getActualTypeArguments();
+
+                    if (actualTypeArguments != null && actualTypeArguments.length > 0) {
+                        Type targetType = actualTypeArguments[0];
+                        if (targetType instanceof Class) {
+                            Class cls = (Class) targetType;
+                            String name = cls.getName().replaceAll("\\$", "."); // need to parse nested class
+                            code.append("codec = ProtobufProxy.create(").append(name).append(".class");
+
+                            if (debug) {
+                                code.append(", true");
+                            } else {
+                                code.append(", false");
+                            }
+
+                            String spath = "null";
+                            if (outputPath != null) {
+                                spath = "new java.io.File(\"" + outputPath.getAbsolutePath().replace('\\', '/') + "\")";
+                            }
+                            code.append(",").append(spath);
+
+                            code.append(");\n");
+
+                            // try to eagle load
+                            relativeProxyClasses.add(cls);
+
+                            code.append("int length = input.readRawVarint32();\n");
+                            code.append("final int oldLimit = input.pushLimit(length);\n");
+                            listTypeCheck = true;
+                            express = "(" + name + ") codec.readFrom(input)";
+                        }
+                    }
+
+                }
+            } else if (field.getFieldType() == FieldType.OBJECT) {
+                Class cls = field.getField().getType();
+                String name = cls.getName().replaceAll("\\$", "."); // need to parse nested class
+                code.append("codec = ProtobufProxy.create(").append(name).append(".class");
+                if (debug) {
+                    code.append(", true");
+                } else {
+                    code.append(", false");
+                }
+
+                String spath = "null";
+                if (outputPath != null) {
+                    spath = "new java.io.File(\"" + outputPath.getAbsolutePath().replace('\\', '/') + "\")";
+                }
+                code.append(",").append(spath);
+                code.append(");\n");
+                // try to eagle load
+                relativeProxyClasses.add(cls);
+
                 code.append("int length = input.readRawVarint32();\n");
                 code.append("final int oldLimit = input.pushLimit(length);\n");
                 listTypeCheck = true;
@@ -700,6 +866,59 @@ public class CodeGenerator {
 
         code.append("final byte[] result = new byte[size];\n");
         code.append("final CodedOutputStream output = CodedOutputStream.newInstance(result);\n");
+        for (FieldInfo field : fields) {
+            boolean isList = isListType(field.getField());
+            // set write to byte
+            code.append(CodedConstant.getMappedWriteCode(field, "output", field.getOrder(), field.getFieldType(),
+                    isList));
+        }
+
+        code.append("return result;\n");
+        code.append("}\n");
+
+        return code.toString();
+    }
+
+    /**
+     * multiplexed memory
+     * */
+    private String getEncodeOverloadMethodCode() {
+        StringBuilder code = new StringBuilder();
+        Set<Integer> orders = new HashSet<Integer>();
+        // encode method
+        code.append("public byte[] encode(").append(cls.getName().replaceAll("\\$", "."));
+        code.append(" t, final byte[] result, int pos) throws IOException {\n");
+        code.append("int size = 0;");
+        for (FieldInfo field : fields) {
+
+            boolean isList = isListType(field.getField());
+
+            // check type
+            if (!isList) {
+                checkType(field.getFieldType(), field.getField());
+            }
+
+            if (orders.contains(field.getOrder())) {
+                throw new IllegalArgumentException("Field order '" + field.getOrder() + "' on field"
+                        + field.getField().getName() + " already exsit.");
+            }
+            // define field
+            code.append(CodedConstant.getMappedTypeDefined(field.getOrder(), field.getFieldType(),
+                    getAccessByField("t", field.getField(), cls), isList));
+            // compute size
+            code.append("if (!CodedConstant.isNull(").append(getAccessByField("t", field.getField(), cls))
+                    .append("))\n");
+            code.append("{\nsize+=");
+            code.append(CodedConstant.getMappedTypeSize(field, field.getOrder(), field.getFieldType(), isList, debug,
+                    outputPath));
+            code.append("}\n");
+            if (field.isRequired()) {
+                code.append(CodedConstant.getRequiredCheck(field.getOrder(), field.getField()));
+            }
+        }
+
+//        code.append("final byte[] result = new byte[size];\n");
+        code.append("final CodedOutputStream output = CodedOutputStream.newInstance(result, pos, pos+size);\n");
         for (FieldInfo field : fields) {
             boolean isList = isListType(field.getField());
             // set write to byte

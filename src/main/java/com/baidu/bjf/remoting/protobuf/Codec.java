@@ -38,6 +38,7 @@ public interface Codec<T> {
      */
     byte[] encode(T t) throws IOException;
 
+    byte[] encode(T t, final byte[] result, int pos) throws IOException;
     /**
      * Do decode action from byte array
      * 
@@ -46,6 +47,8 @@ public interface Codec<T> {
      * @throws IOException if byte array is invalid
      */
     T decode(byte[] bytes) throws IOException;
+
+    T decode(final byte[] bytes, int pos, int len) throws IOException;
     
     /**
      * Calculate size of target object
