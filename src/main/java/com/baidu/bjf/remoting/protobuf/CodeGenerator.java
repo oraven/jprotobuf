@@ -887,17 +887,15 @@ public class CodeGenerator {
         Set<Integer> orders = new HashSet<Integer>();
         // encode method
         code.append("public byte[] encode(").append(cls.getName().replaceAll("\\$", "."));
-        code.append(" t, final byte[] result, int pos) throws IOException {\n");
-        code.append("int size = 0;");
+        code.append(" t, final byte[] result, int pos, int len) throws IOException {\n");
+
+        code.append("final CodedOutputStream output = CodedOutputStream.newInstance(result, pos, pos+len);\n");
         for (FieldInfo field : fields) {
-
             boolean isList = isListType(field.getField());
-
             // check type
             if (!isList) {
                 checkType(field.getFieldType(), field.getField());
             }
-
             if (orders.contains(field.getOrder())) {
                 throw new IllegalArgumentException("Field order '" + field.getOrder() + "' on field"
                         + field.getField().getName() + " already exsit.");
@@ -905,22 +903,9 @@ public class CodeGenerator {
             // define field
             code.append(CodedConstant.getMappedTypeDefined(field.getOrder(), field.getFieldType(),
                     getAccessByField("t", field.getField(), cls), isList));
-            // compute size
-            code.append("if (!CodedConstant.isNull(").append(getAccessByField("t", field.getField(), cls))
-                    .append("))\n");
-            code.append("{\nsize+=");
-            code.append(CodedConstant.getMappedTypeSize(field, field.getOrder(), field.getFieldType(), isList, debug,
-                    outputPath));
-            code.append("}\n");
             if (field.isRequired()) {
                 code.append(CodedConstant.getRequiredCheck(field.getOrder(), field.getField()));
             }
-        }
-
-//        code.append("final byte[] result = new byte[size];\n");
-        code.append("final CodedOutputStream output = CodedOutputStream.newInstance(result, pos, pos+size);\n");
-        for (FieldInfo field : fields) {
-            boolean isList = isListType(field.getField());
             // set write to byte
             code.append(CodedConstant.getMappedWriteCode(field, "output", field.getOrder(), field.getFieldType(),
                     isList));

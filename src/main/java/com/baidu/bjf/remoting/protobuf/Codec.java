@@ -38,7 +38,7 @@ public interface Codec<T> {
      */
     byte[] encode(T t) throws IOException;
 
-    byte[] encode(T t, final byte[] result, int pos) throws IOException;
+    byte[] encode(T t, final byte[] result, int pos, int size) throws IOException;
     /**
      * Do decode action from byte array
      * 
